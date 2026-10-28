@@ -44,7 +44,7 @@ function display(){
  // Embed field limits: show top 75 and note remainder.
  const limited=lines.length>3600?entries.slice(0,75).map(([b,n])=>`👮 **${b}** — **${n}**`).join('\n')+'\n… (ostali su spremljeni u evidenciji)':lines;
  return {embeds:[new EmbedBuilder().setColor(0x80aaff).setTitle('🚔 POLICIJA | EVIDENCIJA POPRAVAKA')
-  .setDescription(`Pregled popravaka po policijskim značkama.\n**Evidencija od ${displayDate(db.week)}**\n\n**Značka — Popravaka**\n`+limited+'\n\n\u200b')
+  .setDescription(`Pregled popravaka po policijskim značkama.\n\n**Evidencija od ${displayDate(db.week)}**\n\n**Značka — Popravaka**\n`+limited+'\n\n\u200b')
   .addFields({name:'Ukupno od zadnjeg reseta',value:`**${count(db.weekly)}**`,inline:true})
   .setFooter({text:'Resetiranje samo ručno • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb'})],components:controls()};
 }
