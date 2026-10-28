@@ -1,6 +1,6 @@
 # Police Repairs Bot
 
-Discord bot za evidenciju popravaka po policijskim značkama. Jedna stalna live poruka, dva gumba, tjedni i ukupni brojači.
+Discord bot za evidenciju popravaka po policijskim značkama. Jedna stalna live poruka, dva gumba, brojači od zadnjeg ručnog reseta i ukupni brojači.
 
 ## Instalacija
 
@@ -20,12 +20,12 @@ Discord bot za evidenciju popravaka po policijskim značkama. Jedna stalna live 
 ## Funkcije
 
 - **Dodaj popravku**: bilo koji član koji vidi poruku unosi značku i broj popravaka.
-- **Resetiraj popravku**: samo administrator ili odabrana uloga. Izbor resetiranja jedne značke ili svih tjednih popravaka; obavezna tekstualna potvrda.
+- **Resetiraj popravku**: samo administrator ili odabrana uloga. Izbor resetiranja jedne značke ili svih trenutnih popravaka; obavezna tekstualna potvrda.
 - **/uloge**: administrator odabire 1-10 uloga za reset. Ako ih ima više od 25, izbornik prikazuje prvih 25 po hijerarhiji.
 - **/status**: prikazuje ukupne brojeve i ovlaštene uloge.
 - **/postavi**: administrator ponovno postavlja ili osvježava live poruku.
-- Tjedni brojač automatski počinje ispočetka **ponedjeljkom po vremenu Europe/Zagreb**. Prethodni tjedan ostaje u `history` u odabranoj pohrani (MySQL ili `data.json`).
-- Ukupno svih vremena se **ne smanjuje** ručnim ili tjednim resetom.
+- **Nema automatskog tjednog reseta.** Popravci ostaju spremljeni preko promjene tjedna i ponovnog pokretanja bota, sve do ručnog reseta. Reset svih znački arhivira prethodne brojače u `history` u odabranoj pohrani (MySQL ili `data.json`).
+- Ukupno svih vremena se **ne smanjuje** ručnim resetom.
 - Bez MYSQL_URL, `data.json` sadrži statistiku, povijest, audit i ID stalne poruke. **Redovito ga sigurnosno kopiraj.**
 
 ## Railway i MySQL

@@ -26,7 +26,6 @@ async function save(){
  try { await storage.save(db); }
  catch { console.error('Spremanje nije uspjelo. Provjeri MySQL i pokreni samo jednu repliku.'); client.destroy(); process.exit(1); }
 }
-async function rollover(){const current=weekKey();if(db.week!==current){db.history[db.week]=structuredClone(db.weekly);db.weekly={};db.week=current;record('AUTO_WEEKLY_ROLLOVER','system',`Početak tjedna ${current}`);await save();return true;}return false;}
 function record(type,user,details){db.audit.push({at:new Date().toISOString(),type,user,details});if(db.audit.length>2000)db.audit=db.audit.slice(-2000);}
 function count(obj){return Object.values(obj).reduce((a,b)=>a+b,0);}
 const client=new Client({intents:[GatewayIntentBits.Guilds]});
@@ -40,13 +39,13 @@ function controls(){return [new ActionRowBuilder().addComponents(
  new ButtonBuilder().setCustomId('repair:reset').setLabel('Resetiraj popravku').setEmoji('↩️').setStyle(ButtonStyle.Danger))];}
 function display(){
  const entries=Object.entries(db.weekly).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],undefined,{numeric:true}));
- const lines=entries.length?entries.map(([badge,n])=>`👮 **${badge}** — **${n}**`).join('\n'):'Još nema unesenih popravaka ovaj tjedan.';
+ const lines=entries.length?entries.map(([badge,n])=>`👮 **${badge}** — **${n}**`).join('\n'):'Još nema unesenih popravaka od zadnjeg reseta.';
  // Embed field limits: show top 75 and note remainder.
  const limited=lines.length>3600?entries.slice(0,75).map(([b,n])=>`👮 **${b}** — **${n}**`).join('\n')+'\n… (ostali su spremljeni u evidenciji)':lines;
  return {embeds:[new EmbedBuilder().setColor(0x80aaff).setTitle('🚔 POLICIJA | EVIDENCIJA POPRAVAKA')
-  .setDescription('Tjedni pregled popravaka po policijskim značkama.\n\n**Značka — Popravaka**\n'+limited)
-  .addFields({name:'Ukupno ovaj tjedan',value:`**${count(db.weekly)}**`,inline:true},{name:'Ukupno svih vremena',value:`**${count(db.lifetime)}**`,inline:true})
-  .setFooter({text:`Tjedan od ${db.week} • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb`})],components:controls()};
+  .setDescription('Pregled popravaka po policijskim značkama.\n\n**Značka — Popravaka**\n'+limited)
+  .addFields({name:'Ukupno od zadnjeg reseta',value:`**${count(db.weekly)}**`,inline:true},{name:'Ukupno svih vremena',value:`**${count(db.lifetime)}**`,inline:true})
+  .setFooter({text:`Resetiranje samo ručno • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb`})],components:controls()};
 }
 async function getChannel(){const channel=await client.channels.fetch(db.channelId||CHANNEL_ID);if(!channel?.isTextBased()||!channel.send)throw Error('CHANNEL_ID nije tekstualni kanal');return channel;}
 async function updatePanel(){const channel=await getChannel();let msg=null;if(db.messageId){try{msg=await channel.messages.fetch(db.messageId);}catch{}}
@@ -62,8 +61,7 @@ function resetModal(mode){return new ModalBuilder().setCustomId(`repair:reset:co
 }
 async function safeReply(i,content){if(i.deferred||i.replied)await i.followUp({content,flags:MessageFlags.Ephemeral});else await i.reply({content,flags:MessageFlags.Ephemeral});}
 client.once(Events.ClientReady,async()=>{console.log(`Prijavljen kao ${client.user.tag}`);
- try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');await rollover();await updatePanel();}catch(e){console.error('Pokretanje:',e);}
- setInterval(async()=>{try{if(await rollover())await updatePanel();}catch(e){console.error('Tjedni reset:',e);}},60_000);
+ try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');await updatePanel();}catch(e){console.error('Pokretanje:',e);}
 });
 client.on(Events.InteractionCreate,async i=>{try{
  if(i.guildId!==GUILD_ID)return;
@@ -80,7 +78,7 @@ client.on(Events.InteractionCreate,async i=>{try{
    if(!i.memberPermissions.has(PermissionFlagsBits.Administrator))return safeReply(i,'Samo administrator može postaviti poruku.');
    await i.deferReply({flags:MessageFlags.Ephemeral});const m=await updatePanel();return i.editReply(`Live poruka spremna: ${m.url}`);
   }
-  if(i.commandName==='status')return safeReply(i,`Tjedan: **${db.week}**\nPopravaka ovaj tjedan: **${count(db.weekly)}**\nUkupno svih vremena: **${count(db.lifetime)}**\nUloge za reset: ${db.roles.length?db.roles.map(r=>`<@&${r}>`).join(', '):'samo administratori'}`);
+  if(i.commandName==='status')return safeReply(i,`Popravaka od zadnjeg reseta: **${count(db.weekly)}**\nUkupno svih vremena: **${count(db.lifetime)}**\nUloge za reset: ${db.roles.length?db.roles.map(r=>`<@&${r}>`).join(', '):'samo administratori'}`);
  }
  if(i.isStringSelectMenu()&&i.customId==='repair:roles'){
   if(!i.memberPermissions.has(PermissionFlagsBits.Administrator))return safeReply(i,'Nemaš dozvolu.');
@@ -92,7 +90,7 @@ client.on(Events.InteractionCreate,async i=>{try{
    if(!canReset(i))return safeReply(i,'⛔ Nemaš dozvolu za resetiranje popravaka.');
    return i.reply({content:'Što želiš resetirati?',components:[new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('repair:reset:one').setLabel('Jedna značka').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('repair:reset:all').setLabel('Sve značke (tjedno)').setStyle(ButtonStyle.Danger))],flags:MessageFlags.Ephemeral});
+    new ButtonBuilder().setCustomId('repair:reset:all').setLabel('Sve značke (ručni reset)').setStyle(ButtonStyle.Danger))],flags:MessageFlags.Ephemeral});
   }
   if(i.customId==='repair:reset:one'||i.customId==='repair:reset:all'){
    if(!canReset(i))return safeReply(i,'Nemaš dozvolu.');
@@ -108,19 +106,19 @@ client.on(Events.InteractionCreate,async i=>{try{
    const badge=i.fields.getTextInputValue('badge').trim();const raw=i.fields.getTextInputValue('amount').trim();
    if(!/^[a-zA-Z0-9_-]{1,20}$/.test(badge))return safeReply(i,'Značka može sadržavati samo slova, brojeve, _ i -.');
    if(!/^[1-9]\d{0,5}$/.test(raw))return safeReply(i,'Broj popravaka mora biti cijeli broj od 1 do 999999.');
-   const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});await rollover();
+   const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});
    db.weekly[badge]=(db.weekly[badge]||0)+amount;db.lifetime[badge]=(db.lifetime[badge]||0)+amount;
    record('ADD',i.user.id,`Značka ${badge}, +${amount}`);await save();
-   try{await updatePanel();await i.editReply(`✅ Značka **${badge}**: dodano **${amount}**. Ovaj tjedan: **${db.weekly[badge]}**.`);}catch(e){await i.editReply('Unos je spremljen, ali uređivanje live poruke nije uspjelo. Provjeri dozvole bota.');}
+   try{await updatePanel();await i.editReply(`✅ Značka **${badge}**: dodano **${amount}**. Od zadnjeg reseta: **${db.weekly[badge]}**.`);}catch(e){await i.editReply('Unos je spremljen, ali uređivanje live poruke nije uspjelo. Provjeri dozvole bota.');}
    await auditToChannel(`➕ <@${i.user.id}> dodao ${amount} popravaka za značku ${badge}.`);return;
   }
   if(i.customId.startsWith('repair:reset:confirm:')){
    if(!canReset(i))return safeReply(i,'Nemaš dozvolu za resetiranje.');
    const mode=i.customId.split(':').at(-1);const expected=mode==='all'?'RESET SVE':'RESET';
    if(i.fields.getTextInputValue('confirmation').trim().toUpperCase()!==expected)return safeReply(i,`Reset nije izvršen. Za potvrdu upiši točno ${expected}.`);
-   await i.deferReply({flags:MessageFlags.Ephemeral});await rollover();let detail;
+   await i.deferReply({flags:MessageFlags.Ephemeral});let detail;
    if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};}
-   else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka ovaj tjedan.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];}
+   else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka od zadnjeg reseta.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];}
    record('RESET',i.user.id,detail);await save();
    try{await updatePanel();await i.editReply(`✅ Resetirano: ${detail}. Ukupno svih vremena ostaje sačuvano.`);}catch(e){await i.editReply('Reset je spremljen, ali ažuriranje poruke nije uspjelo.');}
    await auditToChannel(`↩️ <@${i.user.id}> resetirao: ${detail}.`);return;
