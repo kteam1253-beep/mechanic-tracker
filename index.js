@@ -1,6 +1,7 @@
 'use strict';
 require('dotenv').config();
 const {createStorage} = require('./storage');
+const {addPlayerRepair, migratePlayers, playerTotals, rankingLines} = require('./players');
 const path = require('node:path');
 const {Client, GatewayIntentBits, Events, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, StringSelectMenuBuilder, MessageFlags} = require('discord.js');
 
@@ -39,13 +40,16 @@ function controls(){return [new ActionRowBuilder().addComponents(
  new ButtonBuilder().setCustomId('repair:add').setLabel('Dodaj popravku').setEmoji('➕').setStyle(ButtonStyle.Success),
  new ButtonBuilder().setCustomId('repair:reset').setLabel('Resetiraj popravku').setEmoji('↩️').setStyle(ButtonStyle.Danger))];}
 function display(){
- const entries=Object.entries(db.weekly).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],undefined,{numeric:true}));
- const lines=entries.length?entries.map(([badge,n])=>`👮 **${badge}** — **${n}**`).join('\n'):'Još nema unesenih popravaka od zadnjeg reseta.';
- // Embed field limits: show top 75 and note remainder.
- const limited=lines.length>3600?entries.slice(0,75).map(([b,n])=>`👮 **${b}** — **${n}**`).join('\n')+'\n… (ostali su spremljeni u evidenciji)':lines;
- return {embeds:[new EmbedBuilder().setColor(0x80aaff).setTitle('🚔 POLICIJA | EVIDENCIJA POPRAVAKA')
-  .setDescription(`Pregled popravaka po policijskim značkama.\n\n**Evidencija od ${displayDate(db.week)}**\n\n**Značka — Popravaka**\n`+limited+'\n\n\u200b')
-  .addFields({name:'Ukupno od zadnjeg reseta',value:`**${count(db.weekly)}**`,inline:true})
+ const badges=rankingLines(Object.entries(db.weekly),(badge,n)=>`👮 **${badge}** — **${n}**`,'Još nema popravaka.');
+ const totals=playerTotals(db);
+ const unknown=count(db.weekly)-count(totals);
+ const players=rankingLines(Object.entries(totals),(user,n)=>`🔧 <@${user}> — **${n}**`,'Još nema evidentiranih igrača.');
+ return {allowedMentions:{parse:[]},embeds:[new EmbedBuilder().setColor(0x80aaff).setTitle('🚔 POLICIJA | EVIDENCIJA POPRAVAKA')
+  .setDescription(`Pregled popravaka po policijskim značkama i igračima koji su ih unijeli.\n\n**Evidencija od ${displayDate(db.week)}**`)
+  .addFields(
+   {name:'Značka — Popravaka',value:badges,inline:true},
+   {name:'Igrač — Popravaka',value:players,inline:true},
+   {name:'Ukupno od zadnjeg reseta',value:`**${count(db.weekly)}**`+(unknown>0?`\nZa **${unknown}** starijih popravaka igrač nije poznat.`:''),inline:false})
   .setFooter({text:'Resetiranje samo ručno • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb'})],components:controls()};
 }
 async function getChannel(){const channel=await client.channels.fetch(db.channelId||CHANNEL_ID);if(!channel?.isTextBased()||!channel.send)throw Error('CHANNEL_ID nije tekstualni kanal');return channel;}
@@ -110,6 +114,7 @@ client.on(Events.InteractionCreate,async i=>{try{
    if(!/^[1-9]\d{0,5}$/.test(raw))return safeReply(i,'Broj popravaka mora biti cijeli broj od 1 do 999999.');
    const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});
    db.weekly[badge]=(db.weekly[badge]||0)+amount;db.lifetime[badge]=(db.lifetime[badge]||0)+amount;
+   addPlayerRepair(db,badge,i.user.id,amount);
    record('ADD',i.user.id,`Značka ${badge}, +${amount}`);await save();
    try{await updatePanel();await i.editReply(`✅ Značka **${badge}**: dodano **${amount}**. Od zadnjeg reseta: **${db.weekly[badge]}**.`);}catch(e){await i.editReply('Unos je spremljen, ali uređivanje live poruke nije uspjelo. Provjeri dozvole bota.');}
    await auditToChannel(`➕ <@${i.user.id}> dodao ${amount} popravaka za značku ${badge}.`);return;
@@ -119,8 +124,8 @@ client.on(Events.InteractionCreate,async i=>{try{
    const mode=i.customId.split(':').at(-1);const expected=mode==='all'?'RESET SVE':'RESET';
    if(i.fields.getTextInputValue('confirmation').trim().toUpperCase()!==expected)return safeReply(i,`Reset nije izvršen. Za potvrdu upiši točno ${expected}.`);
    await i.deferReply({flags:MessageFlags.Ephemeral});let detail;
-   if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};}
-   else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka od zadnjeg reseta.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];}
+   if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};db.playersByBadge={};}
+   else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka od zadnjeg reseta.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];delete db.playersByBadge[badge];}
    record('RESET',i.user.id,detail);await save();
    try{await updatePanel();await i.editReply(`✅ Resetirano: ${detail}. Ukupno svih vremena ostaje sačuvano.`);}catch(e){await i.editReply('Reset je spremljen, ali ažuriranje poruke nije uspjelo.');}
    await auditToChannel(`↩️ <@${i.user.id}> resetirao: ${detail}.`);return;
@@ -130,6 +135,7 @@ client.on(Events.InteractionCreate,async i=>{try{
 async function start(){
  storage = await createStorage({url:process.env.MYSQL_URL, file:FILE, key:GUILD_ID, defaults});
  db = storage.state;
+ if(migratePlayers(db))await save();
  console.log(process.env.MYSQL_URL ? 'Pohrana: MySQL spreman.' : 'Pohrana: lokalni data.json.');
  await client.login(DISCORD_TOKEN);
 }
