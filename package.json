@@ -4,7 +4,15 @@
   "private": true,
   "description": "Discord live police repairs tracker",
   "main": "index.js",
-  "scripts": {"start": "node index.js"},
-  "engines": {"node": ">=20.11.0"},
-  "dependencies": {"discord.js": "^14.18.0", "dotenv": "^16.4.5"}
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.24.6"
+  }
 }

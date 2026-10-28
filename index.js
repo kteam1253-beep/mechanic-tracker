@@ -1,6 +1,6 @@
 'use strict';
 require('dotenv').config();
-const fs = require('node:fs');
+const {createStorage} = require('./storage');
 const path = require('node:path');
 const {Client, GatewayIntentBits, Events, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, StringSelectMenuBuilder, MessageFlags} = require('discord.js');
 
@@ -21,10 +21,12 @@ function weekKey(d=new Date()) {
   return utc.toISOString().slice(0,10);
 }
 function defaults(){return {version:1,week:weekKey(),roles:[],messageId:null,channelId:CHANNEL_ID,weekly:{},lifetime:{},history:{},audit:[]};}
-let db;
-try { db=fs.existsSync(FILE)?{...defaults(),...JSON.parse(fs.readFileSync(FILE,'utf8'))}:defaults(); } catch(e){console.error('Neispravna data.json, zaustavljam radi zaštite podataka:',e);process.exit(1);}
-function save(){const temp=FILE+'.tmp';fs.writeFileSync(temp,JSON.stringify(db,null,2));fs.renameSync(temp,FILE);}
-function rollover(){const current=weekKey();if(db.week!==current){db.history[db.week]=structuredClone(db.weekly);db.weekly={};db.week=current;record('AUTO_WEEKLY_ROLLOVER','system',`Početak tjedna ${current}`);save();return true;}return false;}
+let db, storage;
+async function save(){
+ try { await storage.save(db); }
+ catch { console.error('Spremanje nije uspjelo. Provjeri MySQL i pokreni samo jednu repliku.'); client.destroy(); process.exit(1); }
+}
+async function rollover(){const current=weekKey();if(db.week!==current){db.history[db.week]=structuredClone(db.weekly);db.weekly={};db.week=current;record('AUTO_WEEKLY_ROLLOVER','system',`Početak tjedna ${current}`);await save();return true;}return false;}
 function record(type,user,details){db.audit.push({at:new Date().toISOString(),type,user,details});if(db.audit.length>2000)db.audit=db.audit.slice(-2000);}
 function count(obj){return Object.values(obj).reduce((a,b)=>a+b,0);}
 const client=new Client({intents:[GatewayIntentBits.Guilds]});
@@ -48,7 +50,7 @@ function display(){
 }
 async function getChannel(){const channel=await client.channels.fetch(db.channelId||CHANNEL_ID);if(!channel?.isTextBased()||!channel.send)throw Error('CHANNEL_ID nije tekstualni kanal');return channel;}
 async function updatePanel(){const channel=await getChannel();let msg=null;if(db.messageId){try{msg=await channel.messages.fetch(db.messageId);}catch{}}
- if(msg){await msg.edit(display());}else{msg=await channel.send(display());db.messageId=msg.id;save();}return msg;}
+ if(msg){await msg.edit(display());}else{msg=await channel.send(display());db.messageId=msg.id;await save();}return msg;}
 async function auditToChannel(text){if(!LOG_CHANNEL_ID)return;try{const c=await client.channels.fetch(LOG_CHANNEL_ID);if(c?.isTextBased())await c.send({content:text.slice(0,1900)});}catch(e){console.error('Log kanal:',e.message);}}
 function canReset(i){return i.memberPermissions?.has(PermissionFlagsBits.Administrator)||db.roles.some(r=>i.member?.roles?.cache?.has(r)||Array.isArray(i.member?.roles)&&i.member.roles.includes(r));}
 function addModal(){return new ModalBuilder().setCustomId('repair:add:submit').setTitle('Dodaj popravke').addComponents(
@@ -60,8 +62,8 @@ function resetModal(mode){return new ModalBuilder().setCustomId(`repair:reset:co
 }
 async function safeReply(i,content){if(i.deferred||i.replied)await i.followUp({content,flags:MessageFlags.Ephemeral});else await i.reply({content,flags:MessageFlags.Ephemeral});}
 client.once(Events.ClientReady,async()=>{console.log(`Prijavljen kao ${client.user.tag}`);
- try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');rollover();await updatePanel();}catch(e){console.error('Pokretanje:',e);}
- setInterval(async()=>{try{if(rollover())await updatePanel();}catch(e){console.error('Tjedni reset:',e);}},60_000);
+ try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');await rollover();await updatePanel();}catch(e){console.error('Pokretanje:',e);}
+ setInterval(async()=>{try{if(await rollover())await updatePanel();}catch(e){console.error('Tjedni reset:',e);}},60_000);
 });
 client.on(Events.InteractionCreate,async i=>{try{
  if(i.guildId!==GUILD_ID)return;
@@ -82,7 +84,7 @@ client.on(Events.InteractionCreate,async i=>{try{
  }
  if(i.isStringSelectMenu()&&i.customId==='repair:roles'){
   if(!i.memberPermissions.has(PermissionFlagsBits.Administrator))return safeReply(i,'Nemaš dozvolu.');
-  db.roles=i.values;record('SET_ROLES',i.user.id,i.values.join(','));save();return i.update({content:`Spremljeno. Resetiranje je dozvoljeno ulogama: ${i.values.map(r=>`<@&${r}>`).join(', ')}`,components:[]});
+  db.roles=i.values;record('SET_ROLES',i.user.id,i.values.join(','));await save();return i.update({content:`Spremljeno. Resetiranje je dozvoljeno ulogama: ${i.values.map(r=>`<@&${r}>`).join(', ')}`,components:[]});
  }
  if(i.isButton()){
   if(i.customId==='repair:add')return i.showModal(addModal());
@@ -106,9 +108,9 @@ client.on(Events.InteractionCreate,async i=>{try{
    const badge=i.fields.getTextInputValue('badge').trim();const raw=i.fields.getTextInputValue('amount').trim();
    if(!/^[a-zA-Z0-9_-]{1,20}$/.test(badge))return safeReply(i,'Značka može sadržavati samo slova, brojeve, _ i -.');
    if(!/^[1-9]\d{0,5}$/.test(raw))return safeReply(i,'Broj popravaka mora biti cijeli broj od 1 do 999999.');
-   const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});rollover();
+   const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});await rollover();
    db.weekly[badge]=(db.weekly[badge]||0)+amount;db.lifetime[badge]=(db.lifetime[badge]||0)+amount;
-   record('ADD',i.user.id,`Značka ${badge}, +${amount}`);save();
+   record('ADD',i.user.id,`Značka ${badge}, +${amount}`);await save();
    try{await updatePanel();await i.editReply(`✅ Značka **${badge}**: dodano **${amount}**. Ovaj tjedan: **${db.weekly[badge]}**.`);}catch(e){await i.editReply('Unos je spremljen, ali uređivanje live poruke nije uspjelo. Provjeri dozvole bota.');}
    await auditToChannel(`➕ <@${i.user.id}> dodao ${amount} popravaka za značku ${badge}.`);return;
   }
@@ -116,13 +118,19 @@ client.on(Events.InteractionCreate,async i=>{try{
    if(!canReset(i))return safeReply(i,'Nemaš dozvolu za resetiranje.');
    const mode=i.customId.split(':').at(-1);const expected=mode==='all'?'RESET SVE':'RESET';
    if(i.fields.getTextInputValue('confirmation').trim().toUpperCase()!==expected)return safeReply(i,`Reset nije izvršen. Za potvrdu upiši točno ${expected}.`);
-   await i.deferReply({flags:MessageFlags.Ephemeral});rollover();let detail;
+   await i.deferReply({flags:MessageFlags.Ephemeral});await rollover();let detail;
    if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};}
    else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka ovaj tjedan.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];}
-   record('RESET',i.user.id,detail);save();
+   record('RESET',i.user.id,detail);await save();
    try{await updatePanel();await i.editReply(`✅ Resetirano: ${detail}. Ukupno svih vremena ostaje sačuvano.`);}catch(e){await i.editReply('Reset je spremljen, ali ažuriranje poruke nije uspjelo.');}
    await auditToChannel(`↩️ <@${i.user.id}> resetirao: ${detail}.`);return;
   }
  }
  }catch(e){console.error('Interaction:',e);try{await safeReply(i,'Dogodila se greška. Provjeri konzolu bota.');}catch{}}});
-client.login(DISCORD_TOKEN).catch(e=>{console.error('Prijava nije uspjela:',e.message);process.exit(1);});
+async function start(){
+ storage = await createStorage({url:process.env.MYSQL_URL, file:FILE, key:GUILD_ID, defaults});
+ db = storage.state;
+ console.log(process.env.MYSQL_URL ? 'Pohrana: MySQL spreman.' : 'Pohrana: lokalni data.json.');
+ await client.login(DISCORD_TOKEN);
+}
+start().catch(()=>{console.error('Pokretanje nije uspjelo. Provjeri Discord varijable, MYSQL_URL i dostupnost baze.');process.exit(1);});

@@ -24,15 +24,27 @@ Discord bot za evidenciju popravaka po policijskim značkama. Jedna stalna live 
 - **/uloge**: administrator odabire 1-10 uloga za reset. Ako ih ima više od 25, izbornik prikazuje prvih 25 po hijerarhiji.
 - **/status**: prikazuje ukupne brojeve i ovlaštene uloge.
 - **/postavi**: administrator ponovno postavlja ili osvježava live poruku.
-- Tjedni brojač automatski počinje ispočetka **ponedjeljkom po vremenu Europe/Zagreb**. Prethodni tjedan ostaje u `history` unutar `data.json`.
+- Tjedni brojač automatski počinje ispočetka **ponedjeljkom po vremenu Europe/Zagreb**. Prethodni tjedan ostaje u `history` u odabranoj pohrani (MySQL ili `data.json`).
 - Ukupno svih vremena se **ne smanjuje** ručnim ili tjednim resetom.
-- `data.json` sadrži statistiku, povijest, audit i ID stalne poruke. **Redovito ga sigurnosno kopiraj.**
+- Bez MYSQL_URL, `data.json` sadrži statistiku, povijest, audit i ID stalne poruke. **Redovito ga sigurnosno kopiraj.**
 
-## Važno za hosting
+## Railway i MySQL
 
-Za trajnu evidenciju host mora imati **persistent storage**. Ako hosting briše datoteke pri svakom deployu, `data.json` neće ostati sačuvan. Ovaj mali bot ne zahtijeva MySQL; koristi lokalnu JSON datoteku.
+U Variables servisa **bota** postavi Discord varijable iz .env.example i dodaj:
 
-Nemoj objavljivati `.env` ni bot token. Na Railwayu i sličnim hostovima postavi env varijable u panelu, a podatkovnu datoteku na trajni volume (ili odaberi hosting s trajnim diskom).
+```env
+MYSQL_URL=${{MySQL.MYSQL_URL}}
+```
+
+Ako se servis baze zove drugačije, zamijeni MySQL njegovim nazivom ili koristi Add Variable Reference. Bot i baza trebaju biti u istom Railway projektu i okruženju za pristup privatnom hostu. Start command: `npm start`.
+
+Bot automatski stvara tablicu `police_repairs_state`. U njoj sprema sve brojače, uloge, audit, povijest i ID stalne poruke po Discord serveru. Uz MYSQL_URL nije potreban volume na servisu bota; podatke čuva MySQL servis. Pokreni **jednu repliku bota**.
+
+Ako pri prvom pokretanju postoji lokalni data.json, uvozi se samo ako za server još nema zapisa u bazi. Postojeći zapis u bazi ima prednost. Za prijenos stare evidencije data.json mora biti dostupan botu pri prvom MySQL pokretanju; nemoj ga objavljivati u Gitu.
+
+Bez MYSQL_URL bot i dalje koristi data.json i treba trajni disk. Ako je MYSQL_URL postavljen, greška baze zaustavlja bot bez prelaska na lokalnu datoteku. Nakon greške spremanja provjeri evidenciju prije ponovnog unosa jer je ishod mrežno prekinutog zapisa moguće nepoznat.
+
+Nemoj objavljivati .env ni lozinke. Redovito radi sigurnosne kopije baze.
 
 ## Sigurnost i ograničenja
 
