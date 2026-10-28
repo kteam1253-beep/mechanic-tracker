@@ -60,7 +60,7 @@ function addModal(){return new ModalBuilder().setCustomId('repair:add:submit').s
 function resetModal(mode){return new ModalBuilder().setCustomId(`repair:reset:confirm:${mode}`).setTitle(mode==='all'?'Potvrda resetiranja svih':'Potvrda resetiranja značke').addComponents(
  new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('confirmation').setLabel(mode==='all'?'Upiši RESET SVE':'Upiši RESET').setPlaceholder(mode==='all'?'RESET SVE':'RESET').setStyle(TextInputStyle.Short).setRequired(true)));
 }
-async function safeReply(i,content){if(i.deferred||i.replied)await i.followUp({content,flags:MessageFlags.Ephemeral});else await i.reply({content,flags:MessageFlags.Ephemeral});}
+async function safeReply(i,content){if(i.deferred&&!i.replied)await i.editReply({content});else if(i.replied)await i.followUp({content,flags:MessageFlags.Ephemeral});else await i.reply({content,flags:MessageFlags.Ephemeral});}
 client.once(Events.ClientReady,async()=>{console.log(`Prijavljen kao ${client.user.tag}`);
  try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');await updatePanel();}catch(e){console.error('Pokretanje:',e);}
 });
@@ -69,11 +69,12 @@ client.on(Events.InteractionCreate,async i=>{try{
  if(i.isChatInputCommand()){
   if(i.commandName==='uloge'){
    if(!i.memberPermissions.has(PermissionFlagsBits.Administrator))return safeReply(i,'Samo administrator može mijenjati uloge.');
-   const menu=new StringSelectMenuBuilder().setCustomId('repair:roles').setPlaceholder('Odaberi uloge za resetiranje').setMinValues(1).setMaxValues(10);
+   await i.deferReply({flags:MessageFlags.Ephemeral});
    const roles=(await i.guild.roles.fetch()).filter(r=>r.id!==i.guild.id&&!r.managed).sort((a,b)=>b.position-a.position).first(25);
-   if(!roles.length)return safeReply(i,'Nema dostupnih uloga.');
+   if(!roles.length)return await safeReply(i,'Nema dostupnih uloga.');
+   const menu=new StringSelectMenuBuilder().setCustomId('repair:roles').setPlaceholder('Odaberi uloge za resetiranje').setMinValues(1).setMaxValues(Math.min(10,roles.length));
    menu.addOptions(roles.map(r=>({label:r.name.slice(0,100),value:r.id,default:db.roles.includes(r.id)})));
-   return i.reply({content:`**Uloge koje smiju resetirati:** ${db.roles.length?db.roles.map(r=>`<@&${r}>`).join(', '):'nijedna (osim administratora)'}\nOdaberi jednu ili više uloga (zamjenjuje prethodni izbor).`,components:[new ActionRowBuilder().addComponents(menu)],flags:MessageFlags.Ephemeral});
+   return await i.editReply({content:`**Uloge koje smiju resetirati:** ${db.roles.length?db.roles.map(r=>`<@&${r}>`).join(', '):'nijedna (osim administratora)'}\nOdaberi jednu ili više uloga (zamjenjuje prethodni izbor).`,components:[new ActionRowBuilder().addComponents(menu)]});
   }
   if(i.commandName==='postavi'){
    if(!i.memberPermissions.has(PermissionFlagsBits.Administrator))return safeReply(i,'Samo administrator može postaviti poruku.');
