@@ -20,6 +20,7 @@ function weekKey(d=new Date()) {
   utc.setUTCDate(utc.getUTCDate()-offset);
   return utc.toISOString().slice(0,10);
 }
+function displayDate(isoDate){const [year,month,day]=isoDate.split('-');return `${day}.${month}.${year}.`;}
 function defaults(){return {version:1,week:weekKey(),roles:[],messageId:null,channelId:CHANNEL_ID,weekly:{},lifetime:{},history:{},audit:[]};}
 let db, storage;
 async function save(){
@@ -45,7 +46,7 @@ function display(){
  return {embeds:[new EmbedBuilder().setColor(0x80aaff).setTitle('🚔 POLICIJA | EVIDENCIJA POPRAVAKA')
   .setDescription('Pregled popravaka po policijskim značkama.\n\n**Značka — Popravaka**\n'+limited)
   .addFields({name:'Ukupno od zadnjeg reseta',value:`**${count(db.weekly)}**`,inline:true},{name:'Ukupno svih vremena',value:`**${count(db.lifetime)}**`,inline:true})
-  .setFooter({text:`Resetiranje samo ručno • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb`})],components:controls()};
+  .setFooter({text:`Evidencija od ${displayDate(db.week)} • Resetiranje samo ručno • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb`})],components:controls()};
 }
 async function getChannel(){const channel=await client.channels.fetch(db.channelId||CHANNEL_ID);if(!channel?.isTextBased()||!channel.send)throw Error('CHANNEL_ID nije tekstualni kanal');return channel;}
 async function updatePanel(){const channel=await getChannel();let msg=null;if(db.messageId){try{msg=await channel.messages.fetch(db.messageId);}catch{}}
