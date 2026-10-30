@@ -58,7 +58,7 @@ async function updatePanel(){const channel=await getChannel();let msg=null;if(db
 async function auditToChannel(text){if(!LOG_CHANNEL_ID)return;try{const c=await client.channels.fetch(LOG_CHANNEL_ID);if(c?.isTextBased())await c.send({content:text.slice(0,1900)});}catch(e){console.error('Log kanal:',e.message);}}
 function canReset(i){return i.memberPermissions?.has(PermissionFlagsBits.Administrator)||db.roles.some(r=>i.member?.roles?.cache?.has(r)||Array.isArray(i.member?.roles)&&i.member.roles.includes(r));}
 function addModal(){return new ModalBuilder().setCustomId('repair:add:submit').setTitle('Dodaj popravke').addComponents(
- new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('badge').setLabel('Policijska značka').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(20).setRequired(true).setPlaceholder('125')),
+ new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('badge').setLabel('Policijska značka').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(20).setRequired(true).setPlaceholder('125 ili U.K. 125')),
  new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('amount').setLabel('Broj novih popravaka').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('3')));
 }
 function resetModal(mode){return new ModalBuilder().setCustomId(`repair:reset:confirm:${mode}`).setTitle(mode==='all'?'Potvrda resetiranja svih':'Potvrda resetiranja značke').addComponents(
@@ -110,7 +110,7 @@ client.on(Events.InteractionCreate,async i=>{try{
  if(i.isModalSubmit()){
   if(i.customId==='repair:add:submit'){
    const badge=i.fields.getTextInputValue('badge').trim();const raw=i.fields.getTextInputValue('amount').trim();
-   if(!/^[a-zA-Z0-9_-]{1,20}$/.test(badge))return safeReply(i,'Značka može sadržavati samo slova, brojeve, _ i -.');
+   if(!/^[a-zA-Z0-9_. -]{1,20}$/.test(badge))return safeReply(i,'Značka može sadržavati slova, brojeve, točke, razmake, _ i - (najviše 20 znakova). Primjer: U.K. 125.');
    if(!/^[1-9]\d{0,5}$/.test(raw))return safeReply(i,'Broj popravaka mora biti cijeli broj od 1 do 999999.');
    const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});
    db.weekly[badge]=(db.weekly[badge]||0)+amount;db.lifetime[badge]=(db.lifetime[badge]||0)+amount;

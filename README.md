@@ -19,7 +19,7 @@ Discord bot za evidenciju popravaka po policijskim značkama. Jedna stalna live 
 
 ## Funkcije
 
-- **Dodaj popravku**: bilo koji član koji vidi poruku unosi značku i broj popravaka.
+- **Dodaj popravku**: bilo koji član koji vidi poruku unosi značku i broj popravaka. Značka može sadržavati slova, brojeve, točke, razmake, `_` i `-`, do 20 znakova (npr. `125` ili `U.K. 125`).
 - **Resetiraj popravku**: samo administrator ili odabrana uloga. Izbor resetiranja jedne značke ili svih trenutnih popravaka; obavezna tekstualna potvrda.
 - **/uloge**: administrator odabire 1-10 uloga za reset. Ako ih ima više od 25, izbornik prikazuje prvih 25 po hijerarhiji.
 - **/status**: prikazuje ukupne brojeve i ovlaštene uloge.

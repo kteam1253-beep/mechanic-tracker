@@ -11,12 +11,12 @@ function migratePlayers(state) {
   state.playersByBadge = {};
   for (const event of state.audit || []) {
     if (event.type === 'ADD') {
-      const match = /^Značka ([a-zA-Z0-9_-]{1,20}), \+(\d+)$/.exec(event.details);
+      const match = /^Značka ([a-zA-Z0-9_. -]{1,20}), \+(\d+)$/.exec(event.details);
       if (match && /^\d+$/.test(event.user)) addPlayerRepair(state, match[1], event.user, Number(match[2]));
     } else if (event.type === 'RESET') {
       if (event.details.startsWith('Sve značke:')) state.playersByBadge = {};
       else {
-        const match = /^Značka ([a-zA-Z0-9_-]{1,20}):/.exec(event.details);
+        const match = /^Značka ([a-zA-Z0-9_. -]{1,20}):/.exec(event.details);
         if (match) delete state.playersByBadge[match[1]];
       }
     }
