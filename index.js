@@ -1,6 +1,7 @@
 'use strict';
 require('dotenv').config();
 const {createStorage} = require('./storage');
+const {localDate, migratePeriod} = require('./period');
 const {addPlayerRepair, migratePlayers, playerTotals, rankingLines} = require('./players');
 const path = require('node:path');
 const {Client, GatewayIntentBits, Events, SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, StringSelectMenuBuilder, MessageFlags} = require('discord.js');
@@ -8,12 +9,6 @@ const {Client, GatewayIntentBits, Events, SlashCommandBuilder, PermissionFlagsBi
 const {DISCORD_TOKEN, CLIENT_ID, GUILD_ID, CHANNEL_ID, LOG_CHANNEL_ID} = process.env;
 for (const k of ['DISCORD_TOKEN','CLIENT_ID','GUILD_ID','CHANNEL_ID']) if (!process.env[k]) { console.error(`Nedostaje ${k} u .env`); process.exit(1); }
 const FILE = path.join(__dirname, 'data.json');
-const ZONE = 'Europe/Zagreb';
-function localDate(d=new Date()) {
-  const parts = new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);
-  const p = Object.fromEntries(parts.map(x=>[x.type,x.value]));
-  return `${p.year}-${p.month}-${p.day}`;
-}
 function weekKey(d=new Date()) {
   const [y,m,day]=localDate(d).split('-').map(Number);
   const utc=new Date(Date.UTC(y,m-1,day));
@@ -124,7 +119,7 @@ client.on(Events.InteractionCreate,async i=>{try{
    const mode=i.customId.split(':').at(-1);const expected=mode==='all'?'RESET SVE':'RESET';
    if(i.fields.getTextInputValue('confirmation').trim().toUpperCase()!==expected)return safeReply(i,`Reset nije izvršen. Za potvrdu upiši točno ${expected}.`);
    await i.deferReply({flags:MessageFlags.Ephemeral});let detail;
-   if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};db.playersByBadge={};}
+   if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};db.playersByBadge={};db.week=localDate();}
    else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka od zadnjeg reseta.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];delete db.playersByBadge[badge];}
    record('RESET',i.user.id,detail);await save();
    try{await updatePanel();await i.editReply(`✅ Resetirano: ${detail}. Ukupno svih vremena ostaje sačuvano.`);}catch(e){await i.editReply('Reset je spremljen, ali ažuriranje poruke nije uspjelo.');}
@@ -135,7 +130,9 @@ client.on(Events.InteractionCreate,async i=>{try{
 async function start(){
  storage = await createStorage({url:process.env.MYSQL_URL, file:FILE, key:GUILD_ID, defaults});
  db = storage.state;
- if(migratePlayers(db))await save();
+ const playersChanged = migratePlayers(db);
+ const periodChanged = migratePeriod(db);
+ if(playersChanged || periodChanged)await save();
  console.log(process.env.MYSQL_URL ? 'Pohrana: MySQL spreman.' : 'Pohrana: lokalni data.json.');
  await client.login(DISCORD_TOKEN);
 }
