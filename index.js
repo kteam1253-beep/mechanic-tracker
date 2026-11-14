@@ -17,7 +17,7 @@ function weekKey(d=new Date()) {
   return utc.toISOString().slice(0,10);
 }
 function displayDate(isoDate){const [year,month,day]=isoDate.split('-');return `${day}.${month}.${year}.`;}
-function defaults(){return {version:1,week:weekKey(),roles:[],messageId:null,channelId:CHANNEL_ID,weekly:{},lifetime:{},history:{},audit:[]};}
+function defaults(){return {version:1,week:weekKey(),roles:[],messageId:null,payoutMessageId:null,channelId:CHANNEL_ID,weekly:{},lifetime:{},history:{},audit:[],unpaidByPlayer:{}};}
 let db, storage;
 async function save(){
  try { await storage.save(db); }
@@ -47,9 +47,22 @@ function display(){
    {name:'Ukupno od zadnjeg reseta',value:`**${count(db.weekly)}**`+(unknown>0?`\nZa **${unknown}** starijih popravaka igrač nije poznat.`:''),inline:false})
   .setFooter({text:'Resetiranje samo ručno • Automatsko ažuriranje nakon svake promjene • Europe/Zagreb'})],components:controls()};
 }
+const REPAIR_RATE=1650;
+function payoutControls(){return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('payout:open').setLabel('Isplati').setEmoji('💵').setStyle(ButtonStyle.Primary))];}
+function payoutDisplay(){
+ const lines=Object.entries(db.unpaidByPlayer||{}).filter(([,n])=>n>0).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],undefined,{numeric:true}));
+ const value=lines.length?lines.map(([user,n])=>`🔧 <@${user}> — **${n}** popravaka — **${(n*REPAIR_RATE).toLocaleString('de-DE')} $**`).join('\n'):'Još nema neisplaćenih popravaka.';
+ return {allowedMentions:{parse:[]},embeds:[new EmbedBuilder().setColor(0x24a36a).setTitle('💵 EVIDENCIJA ISPLATA').setDescription(`Neisplaćene popravke po igračima.\n**1 popravka = ${REPAIR_RATE.toLocaleString('de-DE')} $**\n\n${value}`.slice(0,4000)).setFooter({text:'Isplata umanjuje samo neisplaćeni saldo • Stanje se čuva nakon restarta'})],components:payoutControls()};
+}
 async function getChannel(){const channel=await client.channels.fetch(db.channelId||CHANNEL_ID);if(!channel?.isTextBased()||!channel.send)throw Error('CHANNEL_ID nije tekstualni kanal');return channel;}
 async function updatePanel(){const channel=await getChannel();let msg=null;if(db.messageId){try{msg=await channel.messages.fetch(db.messageId);}catch{}}
  if(msg){await msg.edit(display());}else{msg=await channel.send(display());db.messageId=msg.id;await save();}return msg;}
+async function updatePayoutPanel(){const channel=await getChannel();let msg=null;if(db.payoutMessageId){try{msg=await channel.messages.fetch(db.payoutMessageId);}catch{}}
+ if(msg){await msg.edit(payoutDisplay());}else{msg=await channel.send(payoutDisplay());db.payoutMessageId=msg.id;await save();}return msg;}
+function payoutModal(){
+
+ return new ModalBuilder().setCustomId('payout:confirm').setTitle('Isplata igraču').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('player').setLabel('Discord ID igrača').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Npr. 123456789012345678')),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('amount').setLabel('Iznos za isplatu ($)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('1650')));
+}
 async function auditToChannel(text){if(!LOG_CHANNEL_ID)return;try{const c=await client.channels.fetch(LOG_CHANNEL_ID);if(c?.isTextBased())await c.send({content:text.slice(0,1900)});}catch(e){console.error('Log kanal:',e.message);}}
 function canReset(i){return i.memberPermissions?.has(PermissionFlagsBits.Administrator)||db.roles.some(r=>i.member?.roles?.cache?.has(r)||Array.isArray(i.member?.roles)&&i.member.roles.includes(r));}
 function addModal(){return new ModalBuilder().setCustomId('repair:add:submit').setTitle('Dodaj popravke').addComponents(
@@ -61,7 +74,7 @@ function resetModal(mode){return new ModalBuilder().setCustomId(`repair:reset:co
 }
 async function safeReply(i,content){if(i.deferred&&!i.replied)await i.editReply({content});else if(i.replied)await i.followUp({content,flags:MessageFlags.Ephemeral});else await i.reply({content,flags:MessageFlags.Ephemeral});}
 client.once(Events.ClientReady,async()=>{console.log(`Prijavljen kao ${client.user.tag}`);
- try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');await updatePanel();}catch(e){console.error('Pokretanje:',e);}
+ try{const guild=await client.guilds.fetch(GUILD_ID);await guild.commands.set(commands);console.log('Komande registrirane.');await updatePanel();await updatePayoutPanel();}catch(e){console.error('Pokretanje:',e);}
 });
 client.on(Events.InteractionCreate,async i=>{try{
  if(i.guildId!==GUILD_ID)return;
@@ -86,6 +99,7 @@ client.on(Events.InteractionCreate,async i=>{try{
   db.roles=i.values;record('SET_ROLES',i.user.id,i.values.join(','));await save();return i.update({content:`Spremljeno. Resetiranje je dozvoljeno ulogama: ${i.values.map(r=>`<@&${r}>`).join(', ')}`,components:[]});
  }
  if(i.isButton()){
+  if(i.customId==='payout:open'){if(!canReset(i))return safeReply(i,'Samo administrator ili ovlaštena uloga može evidentirati isplatu.');return i.showModal(payoutModal());}
   if(i.customId==='repair:add')return i.showModal(addModal());
   if(i.customId==='repair:reset'){
    if(!canReset(i))return safeReply(i,'⛔ Nemaš dozvolu za resetiranje popravaka.');
@@ -103,15 +117,23 @@ client.on(Events.InteractionCreate,async i=>{try{
   }
  }
  if(i.isModalSubmit()){
+  if(i.customId==='payout:confirm'){
+   if(!canReset(i))return safeReply(i,'Nemaš dozvolu za evidentiranje isplate.');
+   const user=i.fields.getTextInputValue('player').trim().replace(/^<@!?(\d+)>$/,'$1');const raw=i.fields.getTextInputValue('amount').trim();
+   if(!/^\d{17,20}$/.test(user))return safeReply(i,'Unesi ispravan Discord ID igrača.');if(!/^[1-9]\d*$/.test(raw))return safeReply(i,'Iznos mora biti pozitivan cijeli broj.');
+   const dollars=Number(raw),repairs=dollars/REPAIR_RATE,available=db.unpaidByPlayer[user]||0;if(!Number.isSafeInteger(dollars)||!Number.isInteger(repairs))return safeReply(i,`Iznos mora biti višekratnik od ${REPAIR_RATE.toLocaleString('de-DE')} $.`);if(repairs>available)return safeReply(i,`Igrač ima samo **${available}** neisplaćenih popravaka (**${(available*REPAIR_RATE).toLocaleString('de-DE')} $**).`);
+   await i.deferReply({flags:MessageFlags.Ephemeral});db.unpaidByPlayer[user]-=repairs;if(db.unpaidByPlayer[user]===0)delete db.unpaidByPlayer[user];record('PAYOUT',i.user.id,`Igrač ${user}, ${repairs} popravaka, ${dollars} $`);await save();
+   try{await updatePayoutPanel();await i.editReply(`✅ Evidentirana isplata za <@${user}>: **${dollars.toLocaleString('de-DE')} $** (${repairs} popravaka). Preostalo: **${db.unpaidByPlayer[user]||0}** popravaka.`);}catch{await i.editReply('Isplata je spremljena, ali ažuriranje poruke nije uspjelo.');}await auditToChannel(`💵 <@${i.user.id}> evidentirao isplatu od ${dollars} $ (${repairs} popravaka) za <@${user}>.`);return;
+  }
   if(i.customId==='repair:add:submit'){
    const badge=i.fields.getTextInputValue('badge').trim();const raw=i.fields.getTextInputValue('amount').trim();
    if(!/^[a-zA-Z0-9_. -]{1,20}$/.test(badge))return safeReply(i,'Značka može sadržavati slova, brojeve, točke, razmake, _ i - (najviše 20 znakova). Primjer: U.K. 125.');
    if(!/^[1-9]\d{0,5}$/.test(raw))return safeReply(i,'Broj popravaka mora biti cijeli broj od 1 do 999999.');
    const amount=Number(raw);await i.deferReply({flags:MessageFlags.Ephemeral});
    db.weekly[badge]=(db.weekly[badge]||0)+amount;db.lifetime[badge]=(db.lifetime[badge]||0)+amount;
-   addPlayerRepair(db,badge,i.user.id,amount);
+   addPlayerRepair(db,badge,i.user.id,amount);db.unpaidByPlayer[i.user.id]=(db.unpaidByPlayer[i.user.id]||0)+amount;
    record('ADD',i.user.id,`Značka ${badge}, +${amount}`);await save();
-   try{await updatePanel();await i.editReply(`✅ Značka **${badge}**: dodano **${amount}**. Od zadnjeg reseta: **${db.weekly[badge]}**.`);}catch(e){await i.editReply('Unos je spremljen, ali uređivanje live poruke nije uspjelo. Provjeri dozvole bota.');}
+   try{await updatePanel();await updatePayoutPanel();await i.editReply(`✅ Značka **${badge}**: dodano **${amount}**. Od zadnjeg reseta: **${db.weekly[badge]}**.`);}catch(e){await i.editReply('Unos je spremljen, ali uređivanje live poruke nije uspjelo. Provjeri dozvole bota.');}
    await auditToChannel(`➕ <@${i.user.id}> dodao ${amount} popravaka za značku ${badge}.`);return;
   }
   if(i.customId.startsWith('repair:reset:confirm:')){
@@ -122,14 +144,14 @@ client.on(Events.InteractionCreate,async i=>{try{
    if(mode==='all') {db.history[`${db.week}-manual-${Date.now()}`]=structuredClone(db.weekly);detail=`Sve značke: ${count(db.weekly)} popravaka`;db.weekly={};db.playersByBadge={};db.week=localDate();}
    else {const badge=i.fields.getTextInputValue('badge').trim();if(!Object.hasOwn(db.weekly,badge))return i.editReply(`Značka **${badge}** nema popravaka od zadnjeg reseta.`);detail=`Značka ${badge}: ${db.weekly[badge]} popravaka`;delete db.weekly[badge];delete db.playersByBadge[badge];}
    record('RESET',i.user.id,detail);await save();
-   try{await updatePanel();await i.editReply(`✅ Resetirano: ${detail}. Ukupno svih vremena ostaje sačuvano.`);}catch(e){await i.editReply('Reset je spremljen, ali ažuriranje poruke nije uspjelo.');}
+   try{await updatePanel();await updatePayoutPanel();await i.editReply(`✅ Resetirano: ${detail}. Ukupno svih vremena ostaje sačuvano.`);}catch(e){await i.editReply('Reset je spremljen, ali ažuriranje poruke nije uspjelo.');}
    await auditToChannel(`↩️ <@${i.user.id}> resetirao: ${detail}.`);return;
   }
  }
  }catch(e){console.error('Interaction:',e);try{await safeReply(i,'Dogodila se greška. Provjeri konzolu bota.');}catch{}}});
 async function start(){
  storage = await createStorage({url:process.env.MYSQL_URL, file:FILE, key:GUILD_ID, defaults});
- db = storage.state;
+ db = storage.state;db.unpaidByPlayer ||= {};
  const playersChanged = migratePlayers(db);
  const periodChanged = migratePeriod(db);
  if(playersChanged || periodChanged)await save();
