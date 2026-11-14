@@ -154,7 +154,9 @@ async function start(){
  db = storage.state;db.unpaidByPlayer ||= {};
  const playersChanged = migratePlayers(db);
  const periodChanged = migratePeriod(db);
- if(playersChanged || periodChanged)await save();
+ let payoutsChanged=false;
+ if(!db.payoutsInitialized){db.unpaidByPlayer=playerTotals(db);db.payoutsInitialized=true;payoutsChanged=true;}
+ if(playersChanged || periodChanged || payoutsChanged)await save();
  console.log(process.env.MYSQL_URL ? 'Pohrana: MySQL spreman.' : 'Pohrana: lokalni data.json.');
  await client.login(DISCORD_TOKEN);
 }
